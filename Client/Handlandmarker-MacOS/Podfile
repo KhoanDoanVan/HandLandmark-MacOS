@@ -1,0 +1,11 @@
+platform :macos, '12.0'
+
+use_frameworks!
+
+# Specify your Xcode project
+project 'Handlandmarker-MacOS.xcodeproj'
+
+target 'Handlandmarker-MacOS' do
+  # Add the TensorFlow Lite pod
+  pod 'TensorFlowLiteSwift'
+end
