@@ -11,9 +11,10 @@ import Combine
 
 class ContentViewModel: ObservableObject {
     @Published var isGranted: Bool = false
-    @Published var handLandmarks: [[String: Double]] = []
+    @Published var handLandmarks: [CGPoint] = []  /// Store as screen coordinates
     
     var captureSession: AVCaptureSession!
+    var previewLayer: AVCaptureVideoPreviewLayer?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -33,7 +34,7 @@ class ContentViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Fetch hand landmarks when session is ready
+        /// Fetch hand landmarks when session is ready
         $isGranted
             .sink { [weak self] isGranted in
                 if isGranted {
@@ -42,7 +43,7 @@ class ContentViewModel: ObservableObject {
             }
             .store(in: &cancellables)
     }
-
+    
     func checkAuthorization() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
             case .authorized:
@@ -59,7 +60,7 @@ class ContentViewModel: ObservableObject {
                 fatalError()
         }
     }
-
+    
     func startSession() {
         guard !captureSession.isRunning else { return }
         captureSession.startRunning()
@@ -95,40 +96,38 @@ class ContentViewModel: ObservableObject {
         captureSession.addInput(input)
     }
 
-    // Fetch hand landmarks from a local server (adjust URL as needed)
     func fetchHandLandmarks() {
-        guard let url = URL(string: "http://192.168.1.147:1999/hand_landmarks") else {
+        guard let url = URL(string: "http://127.0.0.1:1999/hand_landmarks") else {
             print("Invalid URL")
             return
         }
 
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             URLSession.shared.dataTask(with: url) { data, response, error in
-                // Handle network error
                 if let error = error {
                     print("Network error: \(error.localizedDescription)")
                     return
                 }
 
-                // Handle invalid response status
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                     print("Invalid server response")
                     return
                 }
 
-                // Handle missing data
                 guard let data = data else {
                     print("No data received")
                     return
                 }
 
-                // Attempt to parse the JSON safely
                 do {
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let landmarks = json["landmarks"] as? [[String: Double]] {
+                        
                         DispatchQueue.main.async {
-                            self.handLandmarks = landmarks
-                            print("Landmarks: \(landmarks)")
+                            self.handLandmarks = landmarks.compactMap { landmark in
+                                guard let x = landmark["x"], let y = landmark["y"] else { return nil }
+                                return self.convertToScreenCoordinates(x: x, y: y)
+                            }
                         }
                     } else {
                         print("Invalid JSON structure")
@@ -138,5 +137,25 @@ class ContentViewModel: ObservableObject {
                 }
             }.resume()
         }
+    }
+
+    func convertToScreenCoordinates(x: Double, y: Double) -> CGPoint {
+        let originalWidth: CGFloat = 1920
+        let originalHeight: CGFloat = 1080
+
+        let targetWidth: CGFloat = 600
+        let targetHeight: CGFloat = 400
+
+        /// Convert normalized coordinates (0.0 - 1.0) to original resolution (1920x1080)
+        let realX = x * originalWidth
+        let realY = y * originalHeight
+
+        /// Scale to the new resolution (600x400)
+        let screenX = (realX / originalWidth) * targetWidth
+        let screenY = (realY / originalHeight) * targetHeight
+
+        print("Converted (\(x), \(y)) -> (\(screenX), \(screenY))") /// Debug Output
+
+        return CGPoint(x: screenX, y: screenY)
     }
 }

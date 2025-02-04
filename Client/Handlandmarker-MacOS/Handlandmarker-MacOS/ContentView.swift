@@ -1,152 +1,77 @@
-////
-////  ContentView.swift
-////  Handlandmarker-MacOS
-////
-////  Created by Đoàn Văn Khoan on 3/2/25.
-////
 //
-//import SwiftUI
-//import Foundation
-//import AVFoundation
-//import Combine
+//  ContentView.swift
+//  Handlandmarker-MacOS
 //
-//class PlayerView: NSView {
-//    
-//    var previewLayer: AVCaptureVideoPreviewLayer?
+//  Created by Đoàn Văn Khoan on 4/2/25.
 //
-//    init(captureSession: AVCaptureSession) {
-//        previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
-//        super.init(frame: .zero)
+
+import SwiftUI
+import Network
+import Cocoa
+
+//struct ContentView: View {
+//    @StateObject private var viewModel = ContentViewModel()
 //
-//        setupLayer()
-//    }
-//
-//    func setupLayer() {
-//
-//        previewLayer?.frame = self.frame
-//        previewLayer?.contentsGravity = .resizeAspectFill
-//        previewLayer?.videoGravity = .resizeAspectFill
-//        previewLayer?.connection?.automaticallyAdjustsVideoMirroring = false
-//        layer = previewLayer
-//    }
-//
-//    required init?(coder: NSCoder) {
-//        fatalError("init(coder:) has not been implemented")
-//    }
-//}
-//
-//struct PlayerContainerView: NSViewRepresentable {
-//    typealias NSViewType = PlayerView
-//
-//    let captureSession: AVCaptureSession
-//
-//    init(captureSession: AVCaptureSession) {
-//        self.captureSession = captureSession
-//    }
-//
-//    func makeNSView(context: Context) -> PlayerView {
-//        return PlayerView(captureSession: captureSession)
-//    }
-//
-//    func updateNSView(_ nsView: PlayerView, context: Context) { }
-//}
-//
-//class ContentViewModel: ObservableObject {
-//
-//    @Published var isGranted: Bool = false
-//    var captureSession: AVCaptureSession!
-//    private var cancellables = Set<AnyCancellable>()
-//
-//    init() {
-//        captureSession = AVCaptureSession()
-//        setupBindings()
-//    }
-//
-//    func setupBindings() {
-//        $isGranted
-//            .sink { [weak self] isGranted in
-//                if isGranted {
-//                    self?.prepareCamera()
-//                } else {
-//                    self?.stopSession()
-//                }
-//            }
-//            .store(in: &cancellables)
-//    }
-//
-//    func checkAuthorization() {
-//        switch AVCaptureDevice.authorizationStatus(for: .video) {
-//            case .authorized: // The user has previously granted access to the camera.
-//                self.isGranted = true
-//
-//            case .notDetermined: // The user has not yet been asked for camera access.
-//                AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-//                    if granted {
-//                        DispatchQueue.main.async {
-//                            self?.isGranted = granted
-//                        }
+//    var body: some View {
+//        ZStack {
+//            if viewModel.isGranted {
+//                PlayerContainerView(captureSession: viewModel.captureSession)
+//                    .frame(width: 640, height: 480)
+//                                
+//                // Displaying hand landmarks
+////                if viewModel.handLandmarks.count == 0 {
+////                    Text("Nothing checking")
+////                } else {
+////                    ForEach(viewModel.handLandmarks.indices, id: \.self) { index in
+////                        Text("Point \(index): x=\(viewModel.handLandmarks[index]["x"] ?? 0), y=\(viewModel.handLandmarks[index]["y"] ?? 0)")
+////                            .padding(2)
+////                    }
+////                }
+////                
+//                Canvas { context, size in
+//                    for point in viewModel.handLandmarks {
+//                        print(point)
+//                        let rect = CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)
+//                        context.fill(Path(ellipseIn: rect), with: .color(.red))
 //                    }
 //                }
-//
-//            case .denied: // The user has previously denied access.
-//                self.isGranted = false
-//                return
-//
-//            case .restricted: // The user can't grant access due to restrictions.
-//                self.isGranted = false
-//                return
-//        @unknown default:
-//            fatalError()
+//            } else {
+//                Text("Camera access is denied or restricted.")
+//                    .foregroundColor(.red)
+//            }
 //        }
-//    }
-//
-//    func startSession() {
-//        guard !captureSession.isRunning else { return }
-//        captureSession.startRunning()
-//    }
-//
-//    func stopSession() {
-//        guard captureSession.isRunning else { return }
-//        captureSession.stopRunning()
-//    }
-//
-//    func prepareCamera() {
-//        captureSession.sessionPreset = .high
-//
-//        if let device = AVCaptureDevice.default(for: .video) {
-//            startSessionForDevice(device)
+//        .onAppear {
+//            viewModel.checkAuthorization()
 //        }
-//    }
-//
-//    func startSessionForDevice(_ device: AVCaptureDevice) {
-//        do {
-//            let input = try AVCaptureDeviceInput(device: device)
-//            addInput(input)
-//            startSession()
-//        }
-//        catch {
-//            print("Something went wrong - ", error.localizedDescription)
-//        }
-//    }
-//
-//    func addInput(_ input: AVCaptureInput) {
-//        guard captureSession.canAddInput(input) == true else {
-//            return
-//        }
-//        captureSession.addInput(input)
 //    }
 //}
-//
-////struct ContentView: View {
-////
-////    @ObservedObject var viewModel = ContentViewModel()
-////    init() {
-////        viewModel.checkAuthorization()
-////    }
-////
-////    var body: some View {
-////        PlayerContainerView(captureSession: viewModel.captureSession)
-////           .clipShape(Circle())
-////    }
-////}
-////
+
+struct ContentView: View {
+    @StateObject private var viewModel = ContentViewModel()
+
+    var body: some View {
+        ZStack {
+            if viewModel.isGranted {
+                PlayerContainerView(captureSession: viewModel.captureSession)
+                    .frame(width: 600, height: 400)
+                
+                // Displaying hand landmarks
+                Canvas { context, size in
+                    for point in viewModel.handLandmarks {
+                        print(point)
+                        let rect = CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)
+                        context.fill(Path(ellipseIn: rect), with: .color(.green))
+                    }
+                }
+                .frame(width: 600, height: 400)
+            } else {
+                Text("Camera access is denied or restricted.")
+                    .foregroundColor(.red)
+            }
+        }
+        .onAppear {
+            viewModel.checkAuthorization()
+        }
+        .frame(width: 600, height: 400)
+    }
+}

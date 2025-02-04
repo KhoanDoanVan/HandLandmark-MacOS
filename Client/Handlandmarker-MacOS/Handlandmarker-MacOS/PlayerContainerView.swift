@@ -32,6 +32,7 @@ class PlayerView: NSView {
     }
 }
 
+
 struct PlayerContainerView: NSViewRepresentable {
     typealias NSViewType = PlayerView
 
