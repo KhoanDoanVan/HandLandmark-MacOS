@@ -9,6 +9,10 @@ import SwiftUI
 import AVFoundation
 import Combine
 
+enum MoveDirection {
+    case left, right
+}
+
 class ContentViewModel: ObservableObject {
     @Published var isGranted: Bool = false
     @Published var handLandmarks: [CGPoint] = []  /// Store as screen coordinates
@@ -16,7 +20,15 @@ class ContentViewModel: ObservableObject {
     var captureSession: AVCaptureSession!
     var previewLayer: AVCaptureVideoPreviewLayer?
     private var cancellables = Set<AnyCancellable>()
-
+    
+    /// Hand landmark
+    private var previousPositions: [Int: CGPoint] = [:]
+    @Published var actionStarted = false
+    private var startTime: Date? = nil
+    private var timeout: TimeInterval = 2.0 // 2 seconds timeout
+    private var previousMiddlePositions: [CGFloat] = []
+    @Published var direction: MoveDirection? = nil
+    
     init() {
         captureSession = AVCaptureSession()
         setupBindings()
@@ -128,6 +140,9 @@ class ContentViewModel: ObservableObject {
                                 guard let x = landmark["x"], let y = landmark["y"] else { return nil }
                                 return self.convertToScreenCoordinates(x: x, y: y)
                             }
+                            
+                            
+                            self.processHandLandmarks(self.handLandmarks)
                         }
                     } else {
                         print("Invalid JSON structure")
@@ -154,8 +169,60 @@ class ContentViewModel: ObservableObject {
         let screenX = (realX / originalWidth) * targetWidth
         let screenY = (realY / originalHeight) * targetHeight
 
-        print("Converted (\(x), \(y)) -> (\(screenX), \(screenY))") /// Debug Output
+//        print("Converted (\(x), \(y)) -> (\(screenX), \(screenY))") /// Debug Output
 
         return CGPoint(x: screenX, y: screenY)
+    }
+    
+    private func processHandLandmarks(_ points: [CGPoint]) {
+        guard points.count >= 21 else { return }
+        self.handLandmarks = points
+        
+        let thumbTip = points[4]
+        let indexTip = points[20]
+        let middlePoints = [points[8], points[12], points[16]]
+        
+        // Detect if action should start when thumb touches index
+        if !actionStarted, distance(thumbTip, indexTip) < 20 {
+            actionStarted = true
+            print("Start")
+            startTime = Date() // Start the timer when thumb and index touch
+            previousMiddlePositions = middlePoints.map { $0.x }
+            previousPositions = middlePoints.enumerated().reduce(into: [:]) { $0[$1.offset] = $1.element }
+        }
+        
+        // Check if action started and if we're within the 2-second window
+        if actionStarted, let startTime = startTime, Date().timeIntervalSince(startTime) < timeout {
+            // Calculate the average horizontal movement of the middle fingers
+            let currentMiddlePositions = middlePoints.map { $0.x }
+            let avgCurrentPosition = currentMiddlePositions.reduce(0, +) / CGFloat(middlePoints.count)
+            let avgPreviousPosition = previousMiddlePositions.reduce(0, +) / CGFloat(previousMiddlePositions.count)
+            
+            // Detect movement direction based on average positions
+            let movedLeft = avgCurrentPosition < avgPreviousPosition - 10
+            let movedRight = avgCurrentPosition > avgPreviousPosition + 10
+            
+            // Handle the swipe actions if movement is detected within the time window
+            if movedLeft && !movedRight {
+                print("Swipe Left detected")
+                actionStarted = false
+                direction = .left
+            } else if movedRight && !movedLeft {
+                print("Swipe Right detected")
+                direction = .right
+                actionStarted = false
+            }
+        } else if actionStarted {
+            // Reset if no movement detected within the 2-second window
+            print("No movement detected within 2 seconds, resetting.")
+            actionStarted = false
+            startTime = nil
+            previousPositions.removeAll()
+            previousMiddlePositions.removeAll()
+        }
+    }
+    
+    private func distance(_ p1: CGPoint, _ p2: CGPoint) -> CGFloat {
+        return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2))
     }
 }
