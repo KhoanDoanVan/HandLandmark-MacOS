@@ -8,6 +8,7 @@
 import SwiftUI
 import AVFoundation
 import Combine
+import Cocoa
 
 enum MoveDirection {
     case left, right
@@ -21,13 +22,26 @@ class ContentViewModel: ObservableObject {
     var previewLayer: AVCaptureVideoPreviewLayer?
     private var cancellables = Set<AnyCancellable>()
     
-    /// Hand landmark
+    /// Add a Timer to handle updates in sync with FPS
+    private var updateTimer: Timer?
+    private var lastUpdateTime = Date()
+    
+    /// Hand landmark left right
     private var previousPositions: [Int: CGPoint] = [:]
     @Published var actionStarted = false
     private var startTime: Date? = nil
     private var timeout: TimeInterval = 2.0 // 2 seconds timeout
     private var previousMiddlePositions: [CGFloat] = []
     @Published var direction: MoveDirection? = nil
+    
+    /// Hand landmark cursor
+    @Published var isCursorActive = false
+    private var trackingTimer: Timer?
+    private var lastCursorPosition: CGPoint?
+    private let screenSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
+    
+    private var smoothFactor: CGFloat = 0.1  // Controls smoothing intensity
+
     
     init() {
         captureSession = AVCaptureSession()
@@ -108,6 +122,7 @@ class ContentViewModel: ObservableObject {
         captureSession.addInput(input)
     }
 
+    // MARK: - FETCH HAND LANDMARKS
     func fetchHandLandmarks() {
         guard let url = URL(string: "http://127.0.0.1:1999/hand_landmarks") else {
             print("Invalid URL")
@@ -141,8 +156,18 @@ class ContentViewModel: ObservableObject {
                                 return self.convertToScreenCoordinates(x: x, y: y)
                             }
                             
-                            
-                            self.processHandLandmarks(self.handLandmarks)
+                            /// Start process hand landmark
+//                            let currentTime = Date()
+//                            if currentTime.timeIntervalSince(self.lastUpdateTime) >= 0.033 {
+//                                /// Update cursor only when more than 33ms has passed (1 frame)
+//                                self.processMoveLeftRight(self.handLandmarks)
+//                                self.processHandGesture(self.handLandmarks)
+//                                self.lastUpdateTime = currentTime
+//                            }
+                            DispatchQueue.main.async {
+                                self.processMoveLeftRight(self.handLandmarks)
+                                self.processHandGesture(self.handLandmarks)
+                            }
                         }
                     } else {
                         print("Invalid JSON structure")
@@ -154,6 +179,7 @@ class ContentViewModel: ObservableObject {
         }
     }
 
+    // MARK: - CONVERT COORDINATES
     func convertToScreenCoordinates(x: Double, y: Double) -> CGPoint {
         let originalWidth: CGFloat = 1920
         let originalHeight: CGFloat = 1080
@@ -162,19 +188,67 @@ class ContentViewModel: ObservableObject {
         let targetHeight: CGFloat = 400
 
         /// Convert normalized coordinates (0.0 - 1.0) to original resolution (1920x1080)
-        let realX = x * originalWidth
-        let realY = y * originalHeight
+        let realX = (1 - x) * originalWidth
+        let realY = (y) * originalHeight
 
         /// Scale to the new resolution (600x400)
         let screenX = (realX / originalWidth) * targetWidth
         let screenY = (realY / originalHeight) * targetHeight
 
-//        print("Converted (\(x), \(y)) -> (\(screenX), \(screenY))") /// Debug Output
 
         return CGPoint(x: screenX, y: screenY)
     }
+        
+    // MARK: - GESTURE
+    private func processHandGesture(_ points: [CGPoint]) {
+        guard points.count >= 21 else { return }
+
+        let thumbTip = points[4]
+        let indexTip = points[8]
+
+        let isTouching = distance(thumbTip, indexTip) < 20
+
+        if isTouching && !isCursorActive {
+            isCursorActive = true
+            lastCursorPosition = indexTip
+            print("Cursor control activated")
+        } else if !isTouching && isCursorActive {
+            isCursorActive = false
+            print("Cursor control deactivated")
+        }
+
+        if isCursorActive, let lastPosition = lastCursorPosition {
+            let deltaX = indexTip.x - lastPosition.x
+            let deltaY = indexTip.y - lastPosition.y
+            
+            // Điều chỉnh tốc độ di chuyển con trỏ (scaleFactor)
+            let scaleFactor: CGFloat = 2.0  // Tăng giá trị này để tăng tốc độ di chuyển của con trỏ
+            moveCursor(deltaX: deltaX * scaleFactor, deltaY: deltaY * scaleFactor)
+            lastCursorPosition = indexTip
+        }
+    }
+
+    private func moveCursor(deltaX: CGFloat, deltaY: CGFloat) {
+        let currentPosition = NSEvent.mouseLocation
+        var newPosition = CGPoint(x: currentPosition.x + deltaX, y: currentPosition.y - deltaY)
+
+        // Giới hạn di chuyển con trỏ không ra ngoài màn hình
+        let screenFrame = NSScreen.main?.frame ?? CGRect.zero
+        newPosition.x = min(max(newPosition.x, screenFrame.origin.x), screenFrame.origin.x + screenFrame.width)
+        newPosition.y = min(max(newPosition.y, screenFrame.origin.y), screenFrame.origin.y + screenFrame.height)
+        
+        // Cập nhật vị trí con trỏ
+        let move = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: newPosition,
+            mouseButton: .left
+        )
+        move?.post(tap: .cghidEventTap)
+    }
     
-    private func processHandLandmarks(_ points: [CGPoint]) {
+    // MARK: - MOVE LEFT RIGHT
+    private func processMoveLeftRight(_ points: [CGPoint]) {
         guard points.count >= 21 else { return }
         self.handLandmarks = points
         
@@ -182,7 +256,7 @@ class ContentViewModel: ObservableObject {
         let indexTip = points[20]
         let middlePoints = [points[8], points[12], points[16]]
         
-        // Detect if action should start when thumb touches index
+        /// Detect if action should start when thumb touches index
         if !actionStarted, distance(thumbTip, indexTip) < 20 {
             actionStarted = true
             print("Start")
@@ -191,18 +265,18 @@ class ContentViewModel: ObservableObject {
             previousPositions = middlePoints.enumerated().reduce(into: [:]) { $0[$1.offset] = $1.element }
         }
         
-        // Check if action started and if we're within the 2-second window
+        /// Check if action started and if we're within the 2-second window
         if actionStarted, let startTime = startTime, Date().timeIntervalSince(startTime) < timeout {
-            // Calculate the average horizontal movement of the middle fingers
+            /// Calculate the average horizontal movement of the middle fingers
             let currentMiddlePositions = middlePoints.map { $0.x }
             let avgCurrentPosition = currentMiddlePositions.reduce(0, +) / CGFloat(middlePoints.count)
             let avgPreviousPosition = previousMiddlePositions.reduce(0, +) / CGFloat(previousMiddlePositions.count)
             
-            // Detect movement direction based on average positions
+            /// Detect movement direction based on average positions
             let movedLeft = avgCurrentPosition < avgPreviousPosition - 10
             let movedRight = avgCurrentPosition > avgPreviousPosition + 10
             
-            // Handle the swipe actions if movement is detected within the time window
+            /// Handle the swipe actions if movement is detected within the time window
             if movedLeft && !movedRight {
                 print("Swipe Left detected")
                 actionStarted = false
@@ -213,7 +287,7 @@ class ContentViewModel: ObservableObject {
                 actionStarted = false
             }
         } else if actionStarted {
-            // Reset if no movement detected within the 2-second window
+            /// Reset if no movement detected within the 2-second window
             print("No movement detected within 2 seconds, resetting.")
             actionStarted = false
             startTime = nil
@@ -222,6 +296,7 @@ class ContentViewModel: ObservableObject {
         }
     }
     
+    // MARK: - DISTANT
     private func distance(_ p1: CGPoint, _ p2: CGPoint) -> CGFloat {
         return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2))
     }

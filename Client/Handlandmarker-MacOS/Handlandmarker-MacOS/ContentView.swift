@@ -41,6 +41,8 @@ struct ContentView: View {
                                 Text("➡️")
                                     .font(.title)
                             }
+                        } else if viewModel.isCursorActive {
+                            Text("🏹")
                         }
                         Spacer()
                     }

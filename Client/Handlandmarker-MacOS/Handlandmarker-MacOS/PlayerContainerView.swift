@@ -24,6 +24,9 @@ class PlayerView: NSView {
         previewLayer?.contentsGravity = .resizeAspectFill
         previewLayer?.videoGravity = .resizeAspectFill
         previewLayer?.connection?.automaticallyAdjustsVideoMirroring = false
+        
+        self.previewLayer?.connection?.isVideoMirrored = true
+        
         layer = previewLayer
     }
 
@@ -31,6 +34,7 @@ class PlayerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 }
+
 
 
 struct PlayerContainerView: NSViewRepresentable {
